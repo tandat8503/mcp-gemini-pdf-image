@@ -43,22 +43,12 @@ if GEMINI_API_KEY:
 # Cache for PDF Part objects to avoid re-downloading same URL
 file_cache: dict[str, types.Part] = {}  # url -> Part object
 
-
-# ============================================================================
-# Models
-# ============================================================================
-
 class PDFUnderstandingResult(BaseModel):
     """Result of PDF understanding"""
     success: bool
     content: str
     error: Optional[str] = None
     file_ids: Optional[str] = None  # For reference
-
-
-# ============================================================================
-# Helper Functions
-# ============================================================================
 
 def format_response_data(data: dict | list[str] | str, success: bool = True, error: Optional[str] = None) -> dict:
     return {
@@ -128,12 +118,6 @@ async def get_pdf_part(url: str) -> types.Part:
     except Exception as e:
         logger.error(f"Error creating PDF Part: {str(e)}")
         raise Exception(f"Failed to process PDF: {str(e)}")
-
-
-# ============================================================================
-# MCP Tools
-# ============================================================================
-
 @mcp.tool(
     name="analyze_single_pdf",
     description="Use this tool when you need to understand the content of a single PDF from a public URL. It can summarize the document, answer specific questions about its content, or extract key information like names, dates, or figures. The tool will return the generated text analysis as a JSON object."
