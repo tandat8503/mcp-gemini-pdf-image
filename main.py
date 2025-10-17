@@ -40,8 +40,8 @@ client = None
 if GEMINI_API_KEY:
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Cache for PDF Part objects to avoid re-downloading same URL
-file_cache: dict[str, types.Part] = {}  # url -> Part object
+# Cache for PDF File objects to avoid re-uploading same URL
+file_cache: dict[str, types.File] = {}  # url -> File object
 
 class PDFUnderstandingResult(BaseModel):
     """Result of PDF understanding"""
@@ -88,36 +88,41 @@ async def download_pdf_from_url(url: str) -> bytes:
             raise Exception(f"Failed to download PDF: {str(e)}")
 
 
-async def get_pdf_part(url: str) -> types.Part:
+async def get_or_upload_file(url: str) -> types.File:
     """
-    Download PDF and create Part object for inline data processing
-    Returns Part object ready for generate_content
+    Download PDF if not cached, then upload it using the File API.
+    Returns the File object ready for generate_content.
     """
     # Check cache first
     if url in file_cache:
-        logger.info(f"Using cached PDF data for URL: {url}")
+        logger.info(f"Using cached File object for URL: {url}")
         return file_cache[url]
     
     # Download PDF
     pdf_data = await download_pdf_from_url(url)
     
-    # Create Part object from bytes (inline data - recommended for PDFs < 20MB)
-    logger.info("Creating PDF Part object for inline processing...")
+    # Upload to Gemini File API
+    logger.info("Uploading PDF to Gemini File API...")
     try:
-        pdf_part = types.Part.from_bytes(
-            data=pdf_data,
-            mime_type='application/pdf'
+        # Extract filename from URL for logging
+        filename = url.split('/')[-1]
+        if not filename or '.' not in filename:
+            filename = f"document_{len(file_cache)}.pdf"
+        
+        pdf_file = client.files.upload(
+            file=io.BytesIO(pdf_data),
+            config=dict(mime_type='application/pdf')
         )
         
         # Cache for future use
-        file_cache[url] = pdf_part
+        file_cache[url] = pdf_file
         
-        logger.info(f"PDF Part created successfully")
-        return pdf_part
+        logger.info(f"File uploaded successfully. URI: {pdf_file.uri}, Name: {filename}")
+        return pdf_file
         
     except Exception as e:
-        logger.error(f"Error creating PDF Part: {str(e)}")
-        raise Exception(f"Failed to process PDF: {str(e)}")
+        logger.error(f"Error uploading file to File API: {str(e)}")
+        raise Exception(f"Failed to upload PDF: {str(e)}")
 @mcp.tool(
     name="analyze_single_pdf",
     description="Use this tool when you need to understand the content of a single PDF from a public URL. It can summarize the document, answer specific questions about its content, or extract key information like names, dates, or figures. The tool will return the generated text analysis as a JSON object."
@@ -134,16 +139,16 @@ async def analyze_single_pdf(
         if not GEMINI_API_KEY or GEMINI_API_KEY.strip() == "":
             return json.dumps(format_response_data("", success=False, error="GEMINI_API_KEY is not configured. Please set it in your .env file. Get key at: https://aistudio.google.com/app/apikey"))
         
-        # Get PDF as Part object
+        # Get PDF as File object
         try:
-            pdf_part = await get_pdf_part(pdf_url)
+            pdf_file = await get_or_upload_file(pdf_url)
         except Exception as e:
             return json.dumps(format_response_data("", success=False, error=f"Error processing PDF ({pdf_url}): {str(e)}"))
         
         # Generate content with PDF
         logger.info(f"Generating content with PDF using model: {DEFAULT_MODEL}")
         try:
-            contents = [pdf_part, prompt]
+            contents = [pdf_file, prompt]
             response = client.models.generate_content(
                 model=DEFAULT_MODEL,
                 contents=contents
@@ -153,7 +158,7 @@ async def analyze_single_pdf(
                 logger.info("PDF processed successfully")
                 payload = {
                     "result": response.text,
-                    "note": "Processed 1 PDF with inline data"
+                    "note": "Processed 1 PDF with File API"
                 }
                 return json.dumps(format_response_data(payload))
             else:
@@ -184,21 +189,21 @@ async def analyze_multiple_pdfs(
         if not GEMINI_API_KEY or GEMINI_API_KEY.strip() == "":
             return json.dumps(format_response_data("", success=False, error="GEMINI_API_KEY is not configured. Please set it in your .env file. Get key at: https://aistudio.google.com/app/apikey"))
         
-        # Get all PDFs as Part objects
-        pdf_parts = []
+        # Get all PDFs as File objects
+        pdf_files = []
         
         for idx, url in enumerate(pdf_urls, 1):
             logger.info(f"Processing PDF {idx}/{len(pdf_urls)}: {url}")
             try:
-                pdf_part = await get_pdf_part(url)
-                pdf_parts.append(pdf_part)
+                pdf_file = await get_or_upload_file(url)
+                pdf_files.append(pdf_file)
             except Exception as e:
                 return json.dumps(format_response_data("", success=False, error=f"Error processing PDF {idx} ({url}): {str(e)}"))
         
         # Generate content with PDFs
-        logger.info(f"Generating content with {len(pdf_parts)} PDFs using model: {DEFAULT_MODEL}")
+        logger.info(f"Generating content with {len(pdf_files)} PDFs using model: {DEFAULT_MODEL}")
         try:
-            contents = pdf_parts + [prompt]
+            contents = pdf_files + [prompt]
             response = client.models.generate_content(
                 model=DEFAULT_MODEL,
                 contents=contents
@@ -208,7 +213,7 @@ async def analyze_multiple_pdfs(
                 logger.info("PDFs processed successfully")
                 payload = {
                     "result": response.text,
-                    "note": f"Processed {len(pdf_parts)} PDFs with inline data"
+                    "note": f"Processed {len(pdf_files)} PDFs with File API"
                 }
                 return json.dumps(format_response_data(payload))
             else:
