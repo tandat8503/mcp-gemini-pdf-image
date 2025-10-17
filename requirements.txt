@@ -3,3 +3,5 @@ google-genai
 httpx
 pydantic
 python-dotenv
+requests
+pillow

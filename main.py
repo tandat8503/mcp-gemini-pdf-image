@@ -228,12 +228,4 @@ async def analyze_multiple_pdfs(
 # ============================================================================
 
 if __name__ == "__main__":
-    logger.info("Starting Gemini PDF MCP Server")
-    logger.info(f"Model: {DEFAULT_MODEL}")
-    logger.info(f"API Key: {'✅ Configured' if GEMINI_API_KEY else '❌ Not configured'}")
-    logger.info("Tools: analyze_single_pdf, analyze_multiple_pdfs")
-    
-    if not GEMINI_API_KEY:
-        logger.warning("⚠️  GEMINI_API_KEY is not set!")
-    
     mcp.run(transport="stdio")
